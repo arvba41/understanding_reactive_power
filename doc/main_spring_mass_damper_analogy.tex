@@ -1,0 +1,300 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\definecolor{codegray}{gray}{0.96}
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codegray},
+  frame=single,
+  breaklines=true,
+  showstringspaces=false
+}
+
+\title{Forced Spring--Mass--Damper Simulation: \\ A Computational and Energy-Based Analysis}
+\author{Documentation for \texttt{main\_spring\_mass\_damper\_analogy.py}}
+\date{September 7, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This article documents a Python simulation of a single-degree-of-freedom spring--mass--damper system subject to a finite-duration force pulse. The program solves the governing ordinary differential equation numerically, reconstructs the force balance, derives instantaneous powers and energy rates, integrates supplied and dissipated energy, verifies physical balance laws, and presents static and animated visualizations. Particular attention is given to the code's positive-power convention: a positive component power is power delivered \emph{to} the mass. With the supplied default values, the model is lightly underdamped with damping ratio $\zeta\approx0.0791$ and natural frequency $\omega_n\approx3.1623\ \mathrm{rad/s}$. A headless execution of the script confirms force and power balance at approximately machine precision.
+\end{abstract}
+
+\section{Purpose and Scope}
+The source file \texttt{main\_spring\_mass\_damper\_analogy.py} is an educational simulation of translational mechanical dynamics and mechanical power flow. It represents a mass connected to a linear spring and viscous damper, with an externally prescribed force. The code is not a symbolic derivation; it computes a sampled numerical trajectory and evaluates all quantities from that trajectory.
+
+The script has eleven logical stages:
+\begin{enumerate}
+  \item import numerical, plotting, integration, and animation tools;
+  \item define physical parameters, initial conditions, and time samples;
+  \item define the applied pulse force;
+  \item express the second-order dynamics as a first-order state equation;
+  \item solve that equation numerically;
+  \item reconstruct forces and check Newton's second law;
+  \item calculate signed instantaneous powers;
+  \item calculate energy-storage rates and their power balance;
+  \item calculate stored, supplied, and dissipated energies;
+  \item calculate damping properties and print numerical diagnostics; and
+  \item generate static figures and an animated mechanical view.
+\end{enumerate}
+
+\section{Physical Model}
+\subsection{Coordinates and sign convention}
+The generalized coordinate $x(t)$ is the displacement of the mass in metres, with positive displacement and applied force directed to the right. Its derivatives are velocity $v(t)=\dot{x}(t)$ in $\mathrm{m/s}$ and acceleration $a(t)=\ddot{x}(t)$ in $\mathrm{m/s^2}$.
+
+All component forces in the program are defined as forces \emph{exerted on the mass}. Thus the spring and damper oppose displacement and velocity respectively:
+\begin{align}
+F_{\mathrm{spring}} &= -kx,\\
+F_{\mathrm{damper}} &= -cv.
+\end{align}
+Here $m$ is mass in kilograms, $c$ is the viscous damping coefficient in $\mathrm{N\,s/m}$, and $k$ is spring stiffness in $\mathrm{N/m}$.
+
+\subsection{Equation of motion}
+Summing the externally applied, spring, and damping forces gives Newton's second law:
+\begin{equation}
+ m\ddot{x} = F_{\mathrm{in}}(t)-c\dot{x}-kx.
+ \label{eq:motion}
+\end{equation}
+Equivalently,
+\begin{equation}
+ m\ddot{x}+c\dot{x}+kx=F_{\mathrm{in}}(t).
+\end{equation}
+This is the forced linear spring--mass--damper equation implemented by the program.
+
+\section{Step 1: Imports and Default Parameters}
+\subsection{Imported libraries}
+\texttt{numpy} supplies vectorized arrays and numerical functions such as \texttt{linspace}, \texttt{sqrt}, \texttt{where}, and \texttt{max}. \texttt{matplotlib.pyplot} creates figures, axes, bars, line plots, annotations, and the rectangular mass. \texttt{FuncAnimation} updates the animated figure. From \texttt{scipy.integrate}, \texttt{solve\_ivp} integrates the initial-value problem and \texttt{cumulative\_trapezoid} numerically integrates power histories into energy histories.
+
+\subsection{Model and simulation settings}
+The program chooses simple SI-unit defaults, listed in Table~\ref{tab:parameters}. Initial displacement and velocity are zero, so the system starts at its unstrained equilibrium position and at rest.
+
+\begin{table}[htbp]
+\centering
+\caption{Default parameters in the source file.}
+\label{tab:parameters}
+\begin{tabular}{lll}
+\toprule
+Quantity & Symbol & Value \\
+\midrule
+Mass & $m$ & $1.0\ \mathrm{kg}$ \\
+Damping coefficient & $c$ & $0.5\ \mathrm{N\,s/m}$ \\
+Spring stiffness & $k$ & $10.0\ \mathrm{N/m}$ \\
+Initial displacement & $x_0$ & $0.0\ \mathrm{m}$ \\
+Initial velocity & $v_0$ & $0.0\ \mathrm{m/s}$ \\
+Start and end time & $t_0,t_f$ & $0.0,20.0\ \mathrm{s}$ \\
+Output samples & $N$ & $100001$ \\
+Target displacement & $x_{\mathrm{target}}$ & $0.05\ \mathrm{m}$ \\
+Pulse duration & $T_p$ & $1.0\ \mathrm{s}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The array \texttt{t\_eval = np.linspace(t\_start, t\_end, n\_points)} contains $N$ equally spaced times. It requests output at intervals of approximately $2.0\times10^{-4}\ \mathrm{s}$; it does not force the internal Runge--Kutta solver to use that as its integration step size.
+
+\section{Step 2: Applied-Force Function}
+The active input is a rectangular pulse. Its amplitude is computed from the target displacement as
+\begin{equation}
+ F_p=kx_{\mathrm{target}}=(10.0)(0.05)=0.5\ \mathrm{N}.
+\end{equation}
+The function \texttt{applied\_force(time)} implements
+\begin{equation}
+F_{\mathrm{in}}(t)=
+\begin{cases}
+F_p, & t\leq T_p,\\
+0, & t>T_p.
+\end{cases}
+\label{eq:pulse}
+\end{equation}
+The use of \texttt{np.where} makes this definition work for either a scalar time supplied by the ODE solver or the full time array supplied later for post-processing. The amplitude is the static force that would hold an ideal undamped spring at $x_{\mathrm{target}}$; because the pulse ends after one second and the system has inertia and damping, it does not prescribe the exact dynamic displacement.
+
+Commented source lines show an alternative sinusoidal forcing idea, but they have no effect at runtime. The pulse in Equation~\ref{eq:pulse} is the actual forcing used by this version.
+
+\section{Step 3: First-Order State Equation}
+Most numerical ODE routines accept first-order systems. The function \texttt{spring\_mass\_damper(t, state)} therefore stores the state as
+\begin{equation}
+\mathbf{y}(t)=\begin{bmatrix}x(t)\\v(t)\end{bmatrix}.
+\end{equation}
+It unpacks \texttt{state} into \texttt{x, v}, evaluates Equation~\ref{eq:motion} for acceleration, and returns
+\begin{equation}
+\dot{\mathbf{y}}=
+\begin{bmatrix}
+\dot{x}\\\dot{v}
+\end{bmatrix}
+=
+\begin{bmatrix}
+v\\[3pt]
+\bigl(F_{\mathrm{in}}(t)-cv-kx\bigr)/m
+\end{bmatrix}.
+\end{equation}
+In code, the returned list is \texttt{[v, acceleration]}. The first element says displacement changes at the current velocity; the second says velocity changes at the acceleration determined by net force divided by mass.
+
+\section{Step 4: Numerical Simulation}
+The call to \texttt{solve\_ivp} integrates the state equation from $t_0$ to $t_f$ with initial state \texttt{[x0, v0]}. It uses the explicit adaptive Runge--Kutta 4(5) method selected by \texttt{method="RK45"}. The requested relative and absolute tolerances, \texttt{rtol=1e-9} and \texttt{atol=1e-11}, make the integration accuracy stringent for this illustrative problem.
+
+The solver result contains the requested sample times in \texttt{solution.t} and a two-row state array in \texttt{solution.y}. Consequently,
+\begin{lstlisting}
+t = solution.t
+x = solution.y[0]
+v = solution.y[1]
+\end{lstlisting}
+extracts the complete time, displacement, and velocity histories. The explicit success check raises \texttt{RuntimeError(solution.message)} if the solver reports failure; later calculations therefore do not silently process an incomplete solution.
+
+Acceleration is deliberately reconstructed from the equation of motion rather than numerically differentiating velocity:
+\begin{equation}
+a=\frac{F_{\mathrm{in}}-cv-kx}{m}.
+\end{equation}
+This approach is consistent with the model and avoids amplifying numerical noise through finite differencing.
+
+\section{Step 5: Force Reconstruction and Newton's-Law Check}
+After solving, the script evaluates each force at every sample:
+\begin{align}
+F_{\mathrm{spring}}&=-kx,\\
+F_{\mathrm{damper}}&=-cv,\\
+F_{\mathrm{net}}&=F_{\mathrm{in}}+F_{\mathrm{spring}}+F_{\mathrm{damper}}.
+\end{align}
+It then computes the residual
+\begin{equation}
+e_F=F_{\mathrm{net}}-ma.
+\end{equation}
+In exact arithmetic $e_F=0$. Reporting \texttt{max(abs(force\_balance\_error))} gives a direct numerical check that all force signs and the independently reconstructed acceleration agree.
+
+\section{Step 6: Instantaneous Power}
+For a translational force, instantaneous mechanical power is $P=Fv$. The script adopts the convention that positive power is delivered to the mass and negative power is removed from it. This yields
+\begin{align}
+P_{\mathrm{spring}}&=F_{\mathrm{spring}}v=-kxv,\\
+P_{\mathrm{damper}}&=F_{\mathrm{damper}}v=-cv^2\leq0,\\
+P_{\mathrm{net}}&=F_{\mathrm{net}}v=mav,\\
+P_{\mathrm{input}}&=F_{\mathrm{in}}v.
+\end{align}
+The damper always has non-positive delivered power because $c\geq0$ and $v^2\geq0$. It removes mechanical energy regardless of the direction of motion. For plotting and energy accumulation, the source also defines the positive heat-generation rate
+\begin{equation}
+P_{\mathrm{dissipated}}=-P_{\mathrm{damper}}=cv^2\geq0.
+\end{equation}
+
+\section{Step 7: Energy Rates and Power Balance}
+The kinetic and spring potential energies are
+\begin{align}
+K&=\frac{1}{2}mv^2,\\
+U&=\frac{1}{2}kx^2.
+\end{align}
+Their rates are calculated directly from the states:
+\begin{align}
+\frac{dK}{dt}&=mav,\\
+\frac{dU}{dt}&=kxv.
+\end{align}
+The sign of $dU/dt$ depends on whether the spring is being loaded or unloaded. The code sums these rates to form the rate of total mechanical energy,
+\begin{equation}
+\frac{dE}{dt}=\frac{dK}{dt}+\frac{dU}{dt}.
+\end{equation}
+Substituting Equation~\ref{eq:motion} shows the forced-response balance:
+\begin{equation}
+\frac{dE}{dt}=P_{\mathrm{input}}+P_{\mathrm{damper}}
+=P_{\mathrm{input}}-P_{\mathrm{dissipated}}.
+\label{eq:powerbalance}
+\end{equation}
+The program tests this relation sample by sample with
+\begin{equation}
+e_P=\frac{dE}{dt}-P_{\mathrm{input}}-P_{\mathrm{damper}}.
+\end{equation}
+
+\section{Step 8: Stored, Dissipated, and Supplied Energy}
+The sampled values \texttt{kinetic\_energy}, \texttt{spring\_energy}, and \texttt{mechanical\_energy} represent $K$, $U$, and $E=K+U$, respectively. The program obtains accumulated damper loss and input work by cumulative trapezoidal integration:
+\begin{align}
+E_{\mathrm{diss}}(t)&=\int_0^t P_{\mathrm{dissipated}}(\tau)\,d\tau,\\
+E_{\mathrm{input}}(t)&=\int_0^t P_{\mathrm{input}}(\tau)\,d\tau.
+\end{align}
+The option \texttt{initial=0.0} makes each integral array start at zero and have the same length as \texttt{t}. Integrating Equation~\ref{eq:powerbalance} gives the global balance
+\begin{equation}
+E(t)+E_{\mathrm{diss}}(t)=E(0)+E_{\mathrm{input}}(t).
+\label{eq:energybalance}
+\end{equation}
+The code's \texttt{energy\_balance\_error} is the left side of Equation~\ref{eq:energybalance} minus its right side. Unlike the force and power residuals, this error includes quadrature error from numerical integration of the sampled power histories.
+
+\subsection{Mechanical active and reactive power}
+For the analogy emphasized by the filename, the damper is the resistive element and the spring and mass are ideal storage elements. The code defines
+\begin{align}
+P_{\mathrm{active,mech}}&=P_{\mathrm{dissipated}}=cv^2,\\
+P_{\mathrm{reactive,mech}}&=\frac{dU}{dt}+\frac{dK}{dt}=\frac{dE}{dt}.
+\end{align}
+The first quantity is irreversible loss, analogous to resistor power. The second is the instantaneous net rate at which mechanical energy changes in storage. It can be positive or negative and should not be confused with AC reactive power measured in var; it is a time-domain mechanical energy-exchange measure.
+
+\section{Step 9: Derived Dynamic Properties}
+The source calculates standard linear-system quantities:
+\begin{align}
+\omega_n&=\sqrt{\frac{k}{m}},\\
+c_{\mathrm{crit}}&=2\sqrt{km},\\
+\zeta&=\frac{c}{c_{\mathrm{crit}}}.
+\end{align}
+It classifies the response as underdamped for $\zeta<1$, critically damped when \texttt{np.isclose(zeta, 1.0)} is true, and overdamped otherwise. In the underdamped case it additionally calculates
+\begin{equation}
+\omega_d=\omega_n\sqrt{1-\zeta^2}.
+\end{equation}
+For critical damping it assigns $\omega_d=0$; for overdamping it assigns \texttt{np.nan}, since an oscillatory damped frequency is not applicable.
+
+With the default values, the printed results are $\omega_n=3.1623\ \mathrm{rad/s}$, $c_{\mathrm{crit}}=6.3246\ \mathrm{N\,s/m}$, $\zeta=0.0791$, and $\omega_d=3.1524\ \mathrm{rad/s}$. The light damping explains why energy transfers between mass and spring after the input pulse while the motion decays gradually.
+
+\section{Step 10: Console Diagnostics and Reproducibility}
+The print block reports parameters, pulse settings, derived properties, initial and final mechanical energy, final cumulative damper loss, and maximum absolute residuals. A headless execution using \texttt{MPLBACKEND=Agg python3 main\_spring\_mass\_damper\_analogy.py} produced the following balance diagnostics with the default configuration:
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+Diagnostic & Reported value \\
+\midrule
+Initial mechanical energy & $0.00000000\ \mathrm{J}$ \\
+Final mechanical energy & $0.00000306\ \mathrm{J}$ \\
+Dissipated energy & $0.04448249\ \mathrm{J}$ \\
+Maximum force-balance error & $5.551\times10^{-17}\ \mathrm{N}$ \\
+Maximum power-balance error & $2.255\times10^{-17}\ \mathrm{W}$ \\
+Maximum energy-balance error & $6.843\times10^{-8}\ \mathrm{J}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+These results support the implementation: force and instantaneous-power checks are at floating-point round-off scale, while the larger but still small energy residual is consistent with cumulative trapezoidal quadrature over sampled values.
+
+\section{Step 11: Static Plots}
+The first figure has four vertically stacked axes sharing a time axis. \texttt{constrained\_layout=True} lets Matplotlib position titles, labels, and legends without manual spacing.
+\begin{enumerate}
+  \item The first panel plots $x$, $v$, $a$, and $F_{\mathrm{in}}$. They have different SI units, so the vertical label deliberately says ``State value'' rather than implying one common unit.
+  \item The second panel plots $U$, $K$, $E$, $E_{\mathrm{diss}}$, and $E_{\mathrm{input}}$. Equation~\ref{eq:energybalance} is visible by comparing mechanical energy plus dissipated energy with supplied energy.
+  \item The third panel plots $dU/dt$, $dK/dt$, $dE/dt$, $P_{\mathrm{dissipated}}$, and $P_{\mathrm{input}}$. A horizontal zero line distinguishes power into and out of storage.
+  \item The fourth panel plots the active damper-loss rate and reactive storage-rate measure. This provides the direct mechanical power analogy.
+\end{enumerate}
+Every axis receives a two-column legend and a faint grid. The figure title identifies the simulation globally.
+
+\section{Step 12: Animation}
+The animation retains all $100001$ simulation samples for analysis but renders at most $600$ frames. The array
+\begin{lstlisting}
+frame_indices = np.linspace(0, len(t) - 1, min(600, len(t)), dtype=int)
+\end{lstlisting}
+selects approximately evenly spaced sample indices. This prevents unnecessarily slow display without changing the underlying solution.
+
+The animation contains three panels. The first draws a wall, an equilibrium reference, a zig-zag spring, a damper line, an orange rectangular mass, and a green applied-force arrow. At frame $j$, the mass location is \texttt{equilibrium\_x + x[index]}; the equilibrium offset is only a drawing coordinate, not an addition to the physical displacement. The spring coordinates are regenerated each frame to span the changing wall-to-mass distance. The input arrow length is proportional to $F_{\mathrm{in}}/F_p$ and is protected against division by zero with \texttt{max(pulse\_force\_amplitude, 1e-12)}.
+
+The second panel updates bars for spring-energy rate, kinetic-energy rate, dissipation rate, and input power. The third updates bars for spring potential energy, kinetic energy, cumulative loss, and cumulative input work. Limits are computed from maxima over the full simulation before animation begins, so bars do not rescale from frame to frame. The \texttt{animate(frame)} callback changes graphical artists and returns them. \texttt{FuncAnimation} calls that callback repeatedly, using an interval based on the time spacing between displayed frames so that animation time approximately follows simulation time. Finally, \texttt{plt.show()} opens both the static and animated figures in an interactive Matplotlib backend.
+
+\section{Interpretation and Limitations}
+The model assumes a linear spring, linear viscous damping, constant mass, one-dimensional translation, and an ideal force source. It omits nonlinear stiffness, Coulomb friction, travel limits, gravity, actuator dynamics, sensor noise, and numerical-event handling at the force discontinuity. The pulse boundary is defined inclusively at $t=T_p$; adaptive integration near that discontinuity may merit an explicit segmented integration strategy in higher-accuracy or production studies.
+
+The quantities $E_{\mathrm{diss}}$ and $E_{\mathrm{input}}$ are numerical integrals based on exported samples rather than solver-internal quadrature. Increasing output density reduces trapezoidal-integration error but increases memory and plotting cost. The selected $100001$ samples are appropriate for a clear smooth visualization of this small educational model.
+
+\section{Conclusion}
+The script implements a coherent mechanical-energy workflow: it solves the forced motion, derives forces from the same governing equation, converts force--velocity products into signed power, integrates power into energy, and quantitatively checks the resulting conservation law with damping and input work included. Its numerical diagnostics demonstrate that the stated sign conventions and equations are mutually consistent for the provided pulse-driven, underdamped example.
+
+\begin{thebibliography}{9}
+\bibitem{scipy}
+P. Virtanen et al., ``SciPy 1.0: Fundamental Algorithms for Scientific Computing in Python,'' \emph{Nature Methods}, vol. 17, pp. 261--272, 2020.
+
+\bibitem{matplotlib}
+J. D. Hunter, ``Matplotlib: A 2D Graphics Environment,'' \emph{Computing in Science \& Engineering}, vol. 9, no. 3, pp. 90--95, 2007.
+\end{thebibliography}
+
+\end{document}
