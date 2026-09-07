@@ -58,6 +58,7 @@ def simulate_system(
     spring_force = -stiffness * displacement
     damper_force = -damping * velocity
     net_force = input_force + spring_force + damper_force
+    mass_force = -mass * acceleration
     force_balance_error = net_force - mass * acceleration
 
     spring_power = spring_force * velocity
@@ -102,6 +103,7 @@ def simulate_system(
         "spring_force": spring_force,
         "damper_force": damper_force,
         "net_force": net_force,
+        "mass_force": mass_force,
         "force_balance_error": force_balance_error,
         "spring_power": spring_power,
         "damper_power": damper_power,
@@ -128,10 +130,10 @@ def simulate_system(
 
 
 def draw_time_series(results: dict[str, np.ndarray | float | str]) -> plt.Figure:
-    """Create the four time-series panels from the original script."""
+    """Create the five time-series panels from the original script."""
     time = results["time"]
     figure, axes = plt.subplots(
-        4, 1, figsize=(12, 14), sharex=True, constrained_layout=True
+        5, 1, figsize=(12, 17), sharex=True, constrained_layout=True
     )
 
     axes[0].plot(
@@ -153,79 +155,98 @@ def draw_time_series(results: dict[str, np.ndarray | float | str]) -> plt.Figure
     axes[0].set_ylabel("State value")
 
     axes[1].plot(
+        time, results["spring_force"], label="Spring force -kx [N]", color="tab:blue"
+    )
+    axes[1].plot(
+        time,
+        results["mass_force"],
+        label="Mass inertial force -ma [N]",
+        color="tab:orange",
+    )
+    axes[1].plot(
+        time, results["damper_force"], label="Damper force -cv [N]", color="tab:red"
+    )
+    axes[1].plot(
+        time, results["input_force"], label="Input force F_in [N]", color="tab:green"
+    )
+    axes[1].set_title("Instantaneous forces")
+    axes[1].set_ylabel("Force [N]")
+    axes[1].axhline(0.0, color="gray", linewidth=0.8)
+
+    axes[2].plot(
         time,
         results["spring_energy"],
         label="Spring potential energy [J]",
         color="tab:blue",
     )
-    axes[1].plot(
+    axes[2].plot(
         time,
         results["kinetic_energy"],
         label="Mass kinetic energy [J]",
         color="tab:orange",
     )
-    axes[1].plot(
+    axes[2].plot(
         time, results["mechanical_energy"], label="Mechanical energy [J]", color="black"
     )
-    axes[1].plot(
+    axes[2].plot(
         time,
         results["dissipated_energy"],
         label="Cumulative dissipated energy [J]",
         color="tab:red",
     )
-    axes[1].plot(
+    axes[2].plot(
         time,
         results["input_energy"],
         label="Cumulative input energy [J]",
         color="tab:green",
     )
-    axes[1].set_title("Energy storage and dissipation")
-    axes[1].set_ylabel("Energy [J]")
+    axes[2].set_title("Energy storage and dissipation")
+    axes[2].set_ylabel("Energy [J]")
 
-    axes[2].plot(
+    axes[3].plot(
         time,
         results["spring_energy_rate"],
         label="Spring power dU/dt [W]",
         color="tab:blue",
     )
-    axes[2].plot(
+    axes[3].plot(
         time, results["kinetic_rate"], label="Mass power dK/dt [W]", color="tab:orange"
     )
-    axes[2].plot(
+    axes[3].plot(
         time,
         results["mechanical_energy_rate"],
         label="Mechanical power dE/dt [W]",
         color="black",
     )
-    axes[2].plot(
+    axes[3].plot(
         time,
         results["dissipated_power"],
         label="Dissipated power cv^2 [W]",
         color="tab:red",
     )
-    axes[2].plot(
+    axes[3].plot(
         time, results["input_power"], label="Input power F_in v [W]", color="tab:green"
     )
-    axes[2].set_title("Instantaneous power and energy rates")
-    axes[2].set_ylabel("Power [W]")
-    axes[2].axhline(0.0, color="gray", linewidth=0.8)
+    axes[3].set_title("Instantaneous power and energy rates")
+    axes[3].set_ylabel("Power [W]")
+    axes[3].axhline(0.0, color="gray", linewidth=0.8)
 
-    axes[3].plot(
+    axes[4].plot(
         time,
         results["dissipated_power"],
         label="Active power cv^2 [W]",
         color="tab:red",
     )
-    axes[3].plot(
+    axes[4].plot(
         time,
         results["mechanical_energy_rate"],
         label="Reactive power dU/dt + dK/dt [W]",
         color="tab:green",
     )
-    axes[3].set_title("Active and reactive power")
-    axes[3].set_xlabel("Time [s]")
-    axes[3].set_ylabel("Power [W]")
-    axes[3].axhline(0.0, color="gray", linewidth=0.8)
+    axes[4].set_title("Active and reactive power")
+    axes[4].set_xlabel("Time [s]")
+    axes[4].set_ylabel("Power [W]")
+    axes[4].axhline(0.0, color="gray", linewidth=0.8)
 
     for axis in axes:
         axis.grid(True, alpha=0.3)
@@ -236,17 +257,17 @@ def draw_time_series(results: dict[str, np.ndarray | float | str]) -> plt.Figure
 def draw_snapshot(
     results: dict[str, np.ndarray | float | str], sample_index: int
 ) -> plt.Figure:
-    """Draw the mechanical state and the corresponding power and energy bars."""
+    """Draw the mechanical state and corresponding force, power, and energy bars."""
     displacement = results["displacement"][sample_index]
     input_force = results["input_force"][sample_index]
     pulse_amplitude = results["pulse_amplitude"]
 
-    figure, (motion_axis, power_axis, energy_axis) = plt.subplots(
+    figure, (motion_axis, force_axis, power_axis, energy_axis) = plt.subplots(
         1,
-        3,
-        figsize=(15, 4.5),
+        4,
+        figsize=(18, 4.5),
         constrained_layout=True,
-        gridspec_kw={"width_ratios": [1.35, 1, 1]},
+        gridspec_kw={"width_ratios": [1.35, 1, 1, 1]},
     )
 
     wall_position = -0.15
@@ -297,6 +318,23 @@ def draw_snapshot(
     motion_axis.set_xlabel("Position [m]")
     motion_axis.grid(True, axis="x", alpha=0.3)
     motion_axis.legend(loc="lower right")
+
+    force_names = ["Spring", "Inertia", "Damper", "Input"]
+    force_values = [
+        results["spring_force"][sample_index],
+        results["mass_force"][sample_index],
+        results["damper_force"][sample_index],
+        results["input_force"][sample_index],
+    ]
+    force_axis.bar(
+        force_names,
+        force_values,
+        color=["tab:blue", "tab:orange", "tab:red", "tab:green"],
+    )
+    force_axis.axhline(0.0, color="gray", linewidth=0.8)
+    force_axis.set_title("Forces on the mass")
+    force_axis.set_ylabel("Force [N]")
+    force_axis.grid(True, axis="y", alpha=0.3)
 
     power_names = ["Spring", "Mass", "Dissipated", "Input"]
     power_values = [

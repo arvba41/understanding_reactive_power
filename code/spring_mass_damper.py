@@ -117,6 +117,8 @@ a = (F_input - c * v - k * x) / m
 F_spring = -k * x
 F_damper = -c * v
 F_net = F_input + F_spring + F_damper
+# Inertial force of the mass; together with the applied forces it sums to zero.
+F_mass = -m * a
 
 # Newton's second law check:
 # F_net should equal m*a
@@ -249,7 +251,7 @@ print(f"Maximum energy-balance error: " f"{np.max(np.abs(energy_balance_error)):
 # 10. Plots
 # ============================================================
 
-fig, axes = plt.subplots(4, 1, sharex=True, constrained_layout=True, num=20, clear=True)
+fig, axes = plt.subplots(5, 1, sharex=True, constrained_layout=True, num=20, clear=True)
 
 # Response inputs and state derivatives.
 axes[0].plot(t, x, label=r"Displacement $x$ [m]", color="tab:blue")
@@ -259,39 +261,48 @@ axes[0].plot(t, F_input, label=r"Input force $F_{in}$ [N]", color="tab:green")
 axes[0].set_title("Spring–mass–damper response")
 axes[0].set_ylabel("State value")
 
+# Instantaneous forces, using the convention that each acts on the mass.
+axes[1].plot(t, F_spring, label=r"Spring force $-kx$ [N]", color="tab:blue")
+axes[1].plot(t, F_mass, label=r"Mass inertial force $-ma$ [N]", color="tab:orange")
+axes[1].plot(t, F_damper, label=r"Damper force $-cv$ [N]", color="tab:red")
+axes[1].plot(t, F_input, label=r"Input force $F_{in}$ [N]", color="tab:green")
+axes[1].axhline(0.0, color="gray", linewidth=0.8)
+axes[1].set_title("Instantaneous forces")
+axes[1].set_ylabel("Force [N]")
+
 # Stored energy and energy dissipated by the damper.
-axes[1].plot(t, spring_energy, label="Spring potential energy [J]", color="tab:blue")
-axes[1].plot(t, kinetic_energy, label="Mass kinetic energy [J]", color="tab:orange")
-axes[1].plot(t, mechanical_energy, label="Total mechanical energy [J]", color="black")
-axes[1].plot(
+axes[2].plot(t, spring_energy, label="Spring potential energy [J]", color="tab:blue")
+axes[2].plot(t, kinetic_energy, label="Mass kinetic energy [J]", color="tab:orange")
+axes[2].plot(t, mechanical_energy, label="Total mechanical energy [J]", color="black")
+axes[2].plot(
     t, dissipated_energy, label="Cumulative dissipated energy [J]", color="tab:red"
 )
-axes[1].plot(t, input_energy, label="Cumulative input energy [J]", color="tab:green")
-axes[1].set_title("Energy storage and dissipation")
-axes[1].set_ylabel("Energy [J]")
+axes[2].plot(t, input_energy, label="Cumulative input energy [J]", color="tab:green")
+axes[2].set_title("Energy storage and dissipation")
+axes[2].set_ylabel("Energy [J]")
 
 # Instantaneous powers: rates of change of each energy quantity.
-axes[2].plot(t, dU_dt, label=r"Spring power $dU/dt$ [W]", color="tab:blue")
-axes[2].plot(t, dK_dt, label=r"Mass power $dK/dt$ [W]", color="tab:orange")
-axes[2].plot(t, dE_dt, label=r"Mechanical power $dE/dt$ [W]", color="black")
-axes[2].plot(t, P_dissipated, label=r"Dissipated power $cv^2$ [W]", color="tab:red")
-axes[2].plot(t, P_input, label=r"Input power $F_{in}v$ [W]", color="tab:green")
-axes[2].axhline(0.0, color="gray", linewidth=0.8)
-axes[2].set_title("Instantaneous power and energy rates")
-axes[2].set_ylabel("Power [W]")
+axes[3].plot(t, dU_dt, label=r"Spring power $dU/dt$ [W]", color="tab:blue")
+axes[3].plot(t, dK_dt, label=r"Mass power $dK/dt$ [W]", color="tab:orange")
+axes[3].plot(t, dE_dt, label=r"Mechanical power $dE/dt$ [W]", color="black")
+axes[3].plot(t, P_dissipated, label=r"Dissipated power $cv^2$ [W]", color="tab:red")
+axes[3].plot(t, P_input, label=r"Input power $F_{in}v$ [W]", color="tab:green")
+axes[3].axhline(0.0, color="gray", linewidth=0.8)
+axes[3].set_title("Instantaneous power and energy rates")
+axes[3].set_ylabel("Power [W]")
 
 # Active (damper) and reactive (spring + mass) power.
-axes[3].plot(t, active_power_mech, label=r"Active power $cv^2$ [W]", color="tab:red")
-axes[3].plot(
+axes[4].plot(t, active_power_mech, label=r"Active power $cv^2$ [W]", color="tab:red")
+axes[4].plot(
     t,
     reactive_power_mech,
     label=r"Reactive power $dU/dt + dK/dt$ [W]",
     color="tab:green",
 )
-axes[3].axhline(0.0, color="gray", linewidth=0.8)
-axes[3].set_title("Active and reactive power")
-axes[3].set_ylabel("Power [W]")
-axes[3].set_xlabel("Time [s]")
+axes[4].axhline(0.0, color="gray", linewidth=0.8)
+axes[4].set_title("Active and reactive power")
+axes[4].set_ylabel("Power [W]")
+axes[4].set_xlabel("Time [s]")
 
 for axis in axes:
     axis.legend(ncol=2)
@@ -301,13 +312,13 @@ fig.suptitle("Spring–Mass–Damper Simulation", fontsize=15)
 
 
 # ============================================================
-# 11. Animated mechanical motion, power, and energy
+# 11. Animated mechanical motion, forces, power, and energy
 # ============================================================
 
 # Limit the number of rendered frames while retaining the full simulation data.
 frame_indices = np.linspace(0, len(t) - 1, min(600, len(t)), dtype=int)
-motion_fig, (motion_ax, power_ax, energy_ax) = plt.subplots(
-    3, 1, constrained_layout=True, num=22, clear=True
+motion_fig, (motion_ax, force_ax, power_ax, energy_ax) = plt.subplots(
+    4, 1, constrained_layout=True, num=22, clear=True
 )
 
 motion_ax.set_title("Animated spring–mass–damper motion")
@@ -337,6 +348,26 @@ input_force_arrow = motion_ax.annotate(
     arrowprops=dict(arrowstyle="->", color="tab:green", lw=2),
 )
 motion_ax.legend(loc="lower right")
+
+force_ax.set_title("Instantaneous forces on the mass")
+force_labels = [r"Spring $-kx$", r"Inertia $-ma$", r"Damper $-cv$", r"Input $F_{in}$"]
+force_bars = force_ax.bar(
+    force_labels,
+    [0.0, 0.0, 0.0, 0.0],
+    color=["tab:green", "tab:blue", "tab:red", "tab:orange"],
+    alpha=0.8,
+)
+force_ax.axhline(0, color="gray", linewidth=0.8)
+force_limit = max(
+    np.max(np.abs(F_input)),
+    np.max(np.abs(F_spring)),
+    np.max(np.abs(F_damper)),
+    np.max(np.abs(F_mass)),
+    1e-12,
+)
+force_ax.set_ylim(-1.15 * force_limit, 1.15 * force_limit)
+force_ax.set_ylabel("Force [N]")
+force_ax.grid(True, alpha=0.3)
 
 power_ax.set_title("Instantaneous power")
 power_labels = [
@@ -382,7 +413,7 @@ energy_ax.grid(True, alpha=0.3)
 
 
 def animate(frame):
-    """Update the mechanical drawing and instantaneous power/energy bars."""
+    """Update the mechanical drawing and instantaneous force, power, and energy bars."""
     index = frame_indices[frame]
     mass_x = equilibrium_x + x[index]
     mass_patch.set_x(mass_x)
@@ -401,6 +432,12 @@ def animate(frame):
     arrow_start = mass_x + mass_width / 2
     input_force_arrow.set_position((arrow_start, 0.045))
     input_force_arrow.xy = (arrow_start + arrow_length, 0.045)
+
+    # Show all forces acting on the mass, including the inertial force.
+    force_bars[0].set_height(F_spring[index])
+    force_bars[1].set_height(F_mass[index])
+    force_bars[2].set_height(F_damper[index])
+    force_bars[3].set_height(F_input[index])
 
     # Show the rate of change of each energy quantity.
     power_bars[0].set_height(dU_dt[index])
@@ -421,6 +458,7 @@ def animate(frame):
         damper_line,
         mass_patch,
         input_force_arrow,
+        *force_bars,
         *power_bars,
         *energy_bars,
         motion_text,
